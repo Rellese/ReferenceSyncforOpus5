@@ -1,0 +1,77 @@
+    def start_preview(self) -> None:
+        if self.process is not None:
+            return
+
+        if self.selected_folders_toggle.isChecked():
+            if not self._folder_search_ready:
+                self.start_container_preview()
+                return
+
+            self.status.setText(
+                "Выберите папки и нажмите «Продолжить»"
+            )
+            return
+
+        if self.active_source == "pinterest":
+            self.start_pinterest_preview()
+            return
+
+        if self.meta_source.isChecked():
+            if not self.meta_path.text():
+                QMessageBox.warning(
+                    self,
+                    "Архив не выбран",
+                    "Сначала выберите архив Meta.",
+                )
+                return
+
+            QMessageBox.information(
+                self,
+                "Архив Meta",
+                "Интерфейс готов. Парсер архива Meta "
+                "подключим следующим этапом.",
+            )
+            return
+
+        username = self.username.text().strip()
+
+        if not username:
+            QMessageBox.warning(
+                self,
+                "Не указан аккаунт",
+                "Введите Instagram-никнейм после @.",
+            )
+            return
+
+        browser_code = self.browser.currentData()
+
+        # UNLIMITED_SAVED_RETRIEVAL_V61
+        # The full Saved mode uses gallery-dl cursor pagination
+        # without --post-range. A zero limit is an explicit
+        # sentinel and is ignored by discovery in full mode.
+        if self.recent_search.isChecked():
+            search_mode = "recent"
+            limit = self.recent_limit.value()
+        elif self.smart_search.isChecked():
+            search_mode = "smart"
+            # V6.2: unlimited stream; backend stops when the
+            # first fully known Saved publication is reached.
+            limit = 0
+        else:
+            search_mode = "full"
+            limit = 0
+
+        arguments = [
+            "-m",
+            "app.instagram_sync",
+            "--username",
+            username,
+            "--browser",
+            str(browser_code),
+            "--speed-profile",
+            str(self.download_speed.currentData()),
+            "--search-mode",
+            search_mode,
+            "--limit",
+            str(limit),
+            "--batch-size",

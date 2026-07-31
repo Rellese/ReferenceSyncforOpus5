@@ -1,0 +1,50 @@
+            "50",
+            "--continue-numbering",
+        ]
+
+        self.search_duration_info.setVisible(False)
+        self.search_duration_info.setToolTip(
+            "Поиск выполняется…"
+        )
+
+        self._operation_last_percent = 0
+        self.operation_progress.setVisible(True)
+        self.operation_progress.setRange(0, 0)
+        self.operation_progress.setFormat(
+            "Подготовка сканирования…"
+        )
+        self.thumbnail_controller.clear()
+        self.table.setRowCount(0)
+        self.preview_items = []
+        self.naming_group.setVisible(False)
+        self.import_button.setEnabled(False)
+        self.log.clear()
+        self.process_output = ""
+        self.process_started_at = (
+            datetime.now().timestamp()
+        )
+
+        self.status.setText(
+            "Ищем публикации и проверяем Eagle…"
+        )
+        self.summary.setText("Найдено: —")
+        self.search_button.setEnabled(False)
+
+        self.process = QProcess(self)
+        self.process.setWorkingDirectory(str(PROJECT))
+        self.process.setProgram(str(PYTHON))
+        self.process.setArguments(arguments)
+        self.process.setProcessChannelMode(
+            QProcess.ProcessChannelMode.MergedChannels
+        )
+        self.process.readyReadStandardOutput.connect(
+            self.read_process_output
+        )
+        self.process.finished.connect(
+            self.preview_finished
+        )
+        self.process.start()
+
+    def start_pinterest_preview(self) -> None:
+        if not self.browser_source.isChecked():
+            QMessageBox.information(
