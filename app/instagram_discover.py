@@ -1402,9 +1402,14 @@ def main() -> None:
             collection_id,
             raw_name.strip() or collection_id,
             (
-                f"https://www.instagram.com/"
-                f"{username}/saved/collection/"
-                f"{collection_id}/"
+                saved_url
+                if collection_id
+                == "ALL_MEDIA_AUTO_COLLECTION"
+                else (
+                    f"https://www.instagram.com/"
+                    f"{username}/saved/collection/"
+                    f"{collection_id}/"
+                )
             ),
         ))
 

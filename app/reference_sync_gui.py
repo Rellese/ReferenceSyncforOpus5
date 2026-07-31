@@ -139,6 +139,7 @@ class ReferenceSyncWindow(QMainWindow):
         self.container_payload = None
         self.selected_container_records = []
         self._folder_search_ready = False
+        self._folder_search_confirmed = False
         self._updating_container_tree = False
 
         # V6.4.8 STAGE6.2 CLEAN_EXIT_SESSION_CLEANUP
@@ -2283,29 +2284,22 @@ class ReferenceSyncWindow(QMainWindow):
             for item in self.selected_container_records
         ]
 
-        self.status.setText(
-            "Папки выбраны — подготовка поиска публикаций"
-        )
-        self.summary.setText(
-            f"Выбрано папок: {len(selected_names)}"
-        )
         self.log.setPlainText(
             "Выбранные папки:\n"
             + "\n".join(
                 f"• {name}"
                 for name in selected_names
             )
-            + "\n\n"
-            + "Поиск публикаций не запущен: "
-            + "ожидается подключение folder-aware backend."
         )
-
-        QMessageBox.information(
-            self,
-            "Папки выбраны",
-            "Выбор сохранён. На этом безопасном этапе "
-            "публикации ещё не загружаются.",
+        self.summary.setText(
+            f"Выбрано папок: {len(selected_names)}"
         )
+        self.container_tree.setVisible(False)
+        self.continue_folders_button.setVisible(False)
+        self.continue_folders_button.setEnabled(False)
+        self.table.setVisible(True)
+        self._folder_search_confirmed = True
+        self.start_preview()
 
     def format_author_field(
         self,
@@ -3130,10 +3124,19 @@ class ReferenceSyncWindow(QMainWindow):
                 self.start_container_preview()
                 return
 
-            self.status.setText(
-                "Выберите папки и нажмите «Продолжить»"
-            )
-            return
+            if not self._folder_search_confirmed:
+                self.status.setText(
+                    "Выберите папки и нажмите «Продолжить»"
+                )
+                return
+
+            if self.active_source == "pinterest":
+                self._folder_search_confirmed = False
+                self.status.setText(
+                    "Поиск по доскам Pinterest "
+                    "пока не подключён"
+                )
+                return
 
         if self.active_source == "pinterest":
             self.start_pinterest_preview()
@@ -3201,6 +3204,26 @@ class ReferenceSyncWindow(QMainWindow):
             "50",
             "--continue-numbering",
         ]
+
+        if self._folder_search_confirmed:
+            for record in self.selected_container_records:
+                container_id = str(
+                    record.get("id") or ""
+                ).strip()
+
+                if not container_id:
+                    continue
+
+                container_name = str(
+                    record.get("name") or container_id
+                ).replace(":", " ")
+
+                arguments.extend([
+                    "--collection",
+                    f"{container_id}:{container_name}",
+                ])
+
+        self._folder_search_confirmed = False
 
         self.search_duration_info.setVisible(False)
         self.search_duration_info.setToolTip(

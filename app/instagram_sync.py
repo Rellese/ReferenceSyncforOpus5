@@ -803,6 +803,17 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "--collection",
+        action="append",
+        default=[],
+        metavar="ID:NAME",
+        help=(
+            "Limit discovery to a saved collection. "
+            "Can be repeated."
+        ),
+    )
+
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=5,
@@ -1179,20 +1190,28 @@ def main() -> None:
                 "database_modified": False,
             }, ensure_ascii=False, indent=2))
         else:
+            discovery_arguments = [
+                "--username",
+                args.username,
+                "--browser",
+                args.browser,
+                "--scan-speed",
+                args.speed_profile,
+                "--search-mode",
+                args.search_mode,
+                "--limit",
+                str(args.limit),
+            ]
+
+            for entry in args.collection or []:
+                discovery_arguments.extend([
+                    "--collection",
+                    str(entry),
+                ])
+
             discovery = run_module(
                 "app.instagram_discover",
-                [
-                    "--username",
-                    args.username,
-                    "--browser",
-                    args.browser,
-                    "--scan-speed",
-                    args.speed_profile,
-                    "--search-mode",
-                    args.search_mode,
-                    "--limit",
-                    str(args.limit),
-                ],
+                discovery_arguments,
                 log_lines,
             )
 
@@ -1947,6 +1966,11 @@ def main() -> None:
             else:
                 numbering_argument = ""
 
+            collection_argument = "".join(
+                f'--collection "{entry}" '
+                for entry in (args.collection or [])
+            )
+
             next_command = (
                 "python -m app.instagram_sync "
                 f'--username "{args.username}" '
@@ -1954,6 +1978,7 @@ def main() -> None:
                 f'--speed-profile "{args.speed_profile}" '
                 f'--search-mode "{args.search_mode}" '
                 f"--limit {args.limit} "
+                f"{collection_argument}"
                 f"--batch-size "
                 f"{selected_preview_count} "
                 f"{numbering_argument}"
