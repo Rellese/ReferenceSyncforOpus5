@@ -1,21 +1,50 @@
+# окружение
 .venv/
 __pycache__/
-*.py[cod]
+*.pyc
 .DS_Store
-data/*.sqlite3
-data/*.sqlite3-*
-downloads/*
-temp/*
-logs/*
-reports/*
+
+# бэкапы кода — 390 000 строк мусора
+backups/
+data/code_backups/
+
+# данные, медиа, базы, отчёты
+data/*
+!data/legacy_pinterest/
+data/legacy_pinterest/*
+!data/legacy_pinterest/*.py
+
+*.sqlite3
+*.db
+*.db-journal
+*.log
+
+# секреты
+config.json
+*.cookies
+cookies.txt
+secrets/
+
+# отчёты и выгрузки (194 МБ)
+reports/
+downloads/
+
+# ручные копии файлов перед правками
+*.bak
+*.orig
+*.backup_*
+*.broken_*
+*_backup_*
+
+# архивы и медиа
+*.zip
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.webp
+
+# личная конфигурация и остатки правок
 config/local.json
-!downloads/.gitkeep
-!temp/.gitkeep
-!logs/.gitkeep
-!reports/.gitkeep
-/data/
-/backups/
-/app/*.backup_*
 /app/*.before_*
-/app/*.broken_*
-/app/*.bak
+*.py[cod]

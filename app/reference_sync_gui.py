@@ -20,10 +20,12 @@ from PySide6.QtCore import (
     QProcess,
     QTimer,
     QRect,
+    QRectF,
+    Signal,
     QSize,
     Qt,
 )
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QProgressBar,
     QApplication,
@@ -49,6 +51,8 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -1473,6 +1477,96 @@ class ResettableSplitter(QSplitter):
         self.setSizes(self._default_sizes)
 
 
+
+class ToggleSwitch(QWidget):
+    """Compact ON/OFF switch with a movable circular handle."""
+
+    toggled = Signal(bool)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._checked = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedSize(42, 24)
+        self.setToolTip("Включить поиск в выбранных папках")
+
+    def isChecked(self) -> bool:
+        return self._checked
+
+    def setChecked(self, checked: bool) -> None:
+        checked = bool(checked)
+
+        if checked == self._checked:
+            return
+
+        self._checked = checked
+        self.update()
+        self.toggled.emit(self._checked)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if (
+            self.isEnabled()
+            and event.button()
+            == Qt.MouseButton.LeftButton
+        ):
+            self.setChecked(not self._checked)
+            event.accept()
+            return
+
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in {
+            Qt.Key.Key_Space,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+        }:
+            self.setChecked(not self._checked)
+            event.accept()
+            return
+
+        super().keyPressEvent(event)
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(
+            QPainter.RenderHint.Antialiasing,
+            True,
+        )
+
+        if not self.isEnabled():
+            track = QColor("#343943")
+            handle = QColor("#777d88")
+        elif self._checked:
+            track = QColor("#7569e8")
+            handle = QColor("#ffffff")
+        else:
+            track = QColor("#3a3f4a")
+            handle = QColor("#d8dbe2")
+
+        painter.setPen(
+            QPen(
+                QColor("#8d83ee")
+                if self._checked
+                else QColor("#555b67"),
+                1,
+            )
+        )
+        painter.setBrush(track)
+        painter.drawRoundedRect(
+            QRectF(0.5, 0.5, 41.0, 23.0),
+            11.5,
+            11.5,
+        )
+
+        handle_x = 20.0 if self._checked else 3.0
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(handle)
+        painter.drawEllipse(
+            QRectF(handle_x, 3.0, 18.0, 18.0)
+        )
+
+
 class ReferenceSyncWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -1486,6 +1580,11 @@ class ReferenceSyncWindow(QMainWindow):
         self.active_source = "instagram"
         self.active_operation_source = None
         self.pinterest_preview_output = None
+        self.container_preview_output = None
+        self.container_payload = None
+        self.selected_container_records = []
+        self._folder_search_ready = False
+        self._updating_container_tree = False
 
         # V6.4.8 STAGE6.2 CLEAN_EXIT_SESSION_CLEANUP
         #
@@ -1863,28 +1962,49 @@ class ReferenceSyncWindow(QMainWindow):
         pinterest_layout.setSpacing(10)
 
         pinterest_layout.addWidget(
-            QLabel("Ссылка Pinterest")
+            QLabel("Pinterest-аккаунт")
         )
 
-        self.pinterest_url = QLineEdit()
-        self.pinterest_url.setPlaceholderText(
-            "https://www.pinterest.com/pin/..."
+        pinterest_handle_frame = QFrame()
+        pinterest_handle_frame.setObjectName("handleField")
+        pinterest_handle_layout = QHBoxLayout(
+            pinterest_handle_frame
+        )
+        pinterest_handle_layout.setContentsMargins(
+            10, 0, 10, 0
+        )
+        pinterest_handle_layout.setSpacing(4)
+
+        pinterest_at = QLabel("@")
+        pinterest_at.setObjectName("atPrefix")
+
+        self.pinterest_username = QLineEdit()
+        self.pinterest_username.setFrame(False)
+        self.pinterest_username.setPlaceholderText(
+            "имя пользователя Pinterest"
+        )
+
+        pinterest_handle_layout.addWidget(pinterest_at)
+        pinterest_handle_layout.addWidget(
+            self.pinterest_username,
+            1,
         )
         pinterest_layout.addWidget(
-            self.pinterest_url
+            pinterest_handle_frame
         )
 
         pinterest_layout.addWidget(
-            QLabel("Браузер")
+            QLabel("Браузер с выполненным входом")
         )
 
         self.pinterest_browser = QComboBox()
+        self.pinterest_browser.installEventFilter(self)
         self.pinterest_browser.addItem(
             "Google Chrome",
             "chrome",
         )
         self.pinterest_browser.addItem(
-            "Яндекс",
+            "Яндекс.Браузер",
             "yandex",
         )
         self.pinterest_browser.addItem(
@@ -1912,13 +2032,14 @@ class ReferenceSyncWindow(QMainWindow):
                 self.download_speed.itemText(index),
                 self.download_speed.itemData(index),
             )
+
         pinterest_layout.addWidget(
             self.pinterest_download_speed
         )
 
         pinterest_hint = QLabel(
-            "Вставьте ссылку на Pin, доску "
-            "или раздел доски."
+            "ReferenceSync использует существующий вход "
+            "в Pinterest и не запрашивает пароль."
         )
         pinterest_hint.setObjectName("hint")
         pinterest_hint.setWordWrap(True)
@@ -1929,6 +2050,64 @@ class ReferenceSyncWindow(QMainWindow):
         source_layout.addWidget(
             self.pinterest_panel
         )
+
+        self.pinterest_archive_panel = QFrame()
+        pinterest_archive_layout = QVBoxLayout(
+            self.pinterest_archive_panel
+        )
+        pinterest_archive_layout.setContentsMargins(
+            0, 8, 0, 0
+        )
+        pinterest_archive_layout.setSpacing(9)
+
+        pinterest_archive_layout.addWidget(
+            QLabel("Архив Pinterest")
+        )
+
+        pinterest_archive_row = QHBoxLayout()
+
+        self.pinterest_archive_path = QLineEdit()
+        self.pinterest_archive_path.setReadOnly(True)
+        self.pinterest_archive_path.setPlaceholderText(
+            "Выберите архив Pinterest"
+        )
+
+        choose_pinterest_archive = QPushButton(
+            "Выбрать…"
+        )
+        choose_pinterest_archive.clicked.connect(
+            self.choose_pinterest_archive
+        )
+
+        pinterest_archive_row.addWidget(
+            self.pinterest_archive_path,
+            1,
+        )
+        pinterest_archive_row.addWidget(
+            choose_pinterest_archive
+        )
+        pinterest_archive_layout.addLayout(
+            pinterest_archive_row
+        )
+
+        pinterest_archive_hint = QLabel(
+            "Архив запрашивается в Pinterest: "
+            "Settings → Privacy and data → "
+            "Request your data."
+        )
+        pinterest_archive_hint.setObjectName("hint")
+        pinterest_archive_hint.setWordWrap(True)
+        pinterest_archive_layout.addWidget(
+            pinterest_archive_hint
+        )
+
+        source_layout.addWidget(
+            self.pinterest_archive_panel
+        )
+
+        self.pinterest_url = QLineEdit()
+        self.pinterest_url.setVisible(False)
+
         left.addWidget(source_card)
 
         # Search mode
@@ -2009,6 +2188,61 @@ class ReferenceSyncWindow(QMainWindow):
             self.update_search_interface
         )
 
+        folder_search_row = QHBoxLayout()
+        folder_search_row.setContentsMargins(0, 6, 0, 0)
+        folder_search_row.setSpacing(8)
+
+        self.selected_folders_toggle = ToggleSwitch()
+        self.selected_folders_toggle.setChecked(False)
+        self.selected_folders_toggle.toggled.connect(
+            self.folder_search_toggled
+        )
+
+        self.folder_search_label = QLabel(
+            "Искать в выбранных папках"
+        )
+
+        self.folder_search_info = QPushButton("i")
+        self.folder_search_info.setObjectName(
+            "folderSearchInfo"
+        )
+        self.folder_search_info.setFixedSize(24, 24)
+        self.folder_search_info.setToolTip(
+            "Как работает поиск в папках"
+        )
+        self.folder_search_info.setStyleSheet("""
+            QPushButton#folderSearchInfo {
+                border: 1px solid #626977;
+                border-radius: 12px;
+                background: #2b3039;
+                color: #dfe2e8;
+                font-weight: 700;
+                padding: 0;
+            }
+
+            QPushButton#folderSearchInfo:hover {
+                border-color: #8d83ee;
+                background: #353a46;
+                color: #ffffff;
+            }
+        """)
+        self.folder_search_info.clicked.connect(
+            self.show_folder_search_info
+        )
+
+        folder_search_row.addWidget(
+            self.selected_folders_toggle
+        )
+        folder_search_row.addWidget(
+            self.folder_search_label
+        )
+        folder_search_row.addWidget(
+            self.folder_search_info
+        )
+        folder_search_row.addStretch()
+
+        search_layout.addLayout(folder_search_row)
+
         left.addWidget(search_card)
 
         # Filters
@@ -2030,23 +2264,22 @@ class ReferenceSyncWindow(QMainWindow):
             "Обычные посты"
         )
         self.include_reels = QCheckBox("Reels")
+        self.include_carousels = QCheckBox(
+            "Карусели"
+        )
+
         self.include_posts.setChecked(True)
         self.include_reels.setChecked(True)
+        self.include_carousels.setChecked(True)
 
         types_row.addWidget(self.include_posts)
         types_row.addWidget(self.include_reels)
+        types_row.addWidget(
+            self.include_carousels
+        )
         types_row.addStretch()
 
         filters.addLayout(types_row)
-        filters.addWidget(QLabel("Структура"))
-
-        self.structure_filter = QComboBox()
-        self.structure_filter.addItems([
-            "Любая",
-            "Только одиночные",
-            "Только карусели",
-        ])
-        filters.addWidget(self.structure_filter)
 
         filters.addWidget(
             QLabel("Только выбранные авторы")
@@ -2067,6 +2300,17 @@ class ReferenceSyncWindow(QMainWindow):
             "@author3, @author4"
         )
         filters.addWidget(self.exclude_authors)
+
+        self.include_authors.textEdited.connect(
+            lambda _text: self.format_author_field(
+                self.include_authors
+            )
+        )
+        self.exclude_authors.textEdited.connect(
+            lambda _text: self.format_author_field(
+                self.exclude_authors
+            )
+        )
 
         left.addWidget(self.filters_group)
 
@@ -2219,12 +2463,28 @@ class ReferenceSyncWindow(QMainWindow):
         self.operation_progress.setTextVisible(True)
         self.operation_progress.setVisible(False)
 
+        self.continue_folders_button = QPushButton(
+            "Продолжить"
+        )
+        self.continue_folders_button.setToolTip(
+            "Продолжить поиск публикаций "
+            "в отмеченных папках."
+        )
+        self.continue_folders_button.setEnabled(False)
+        self.continue_folders_button.setVisible(False)
+        self.continue_folders_button.clicked.connect(
+            self.continue_with_selected_folders
+        )
+
         status_bottom.addWidget(self.pause_button)
         status_bottom.addWidget(self.resume_button)
         status_bottom.addWidget(self.stop_button)
         status_bottom.addWidget(
             self.operation_progress,
             1,
+        )
+        status_bottom.addWidget(
+            self.continue_folders_button
         )
 
         status_layout.addLayout(status_top)
@@ -2380,6 +2640,42 @@ class ReferenceSyncWindow(QMainWindow):
         )
 
         results_layout.addLayout(result_header)
+
+        self.container_tree = QTreeWidget()
+        self.container_tree.setObjectName(
+            "sourceContainerTree"
+        )
+        self.container_tree.setHeaderLabels([
+            "Доска, коллекция или раздел",
+            "Тип",
+            "Количество",
+        ])
+        self.container_tree.setAlternatingRowColors(True)
+        self.container_tree.setRootIsDecorated(True)
+        self.container_tree.setUniformRowHeights(True)
+        self.container_tree.setVisible(False)
+        self.container_tree.itemChanged.connect(
+            self.container_tree_item_changed
+        )
+        self.container_tree.setStyleSheet("""
+            QTreeWidget#sourceContainerTree {
+                background: #15181e;
+                alternate-background-color: #1c1f27;
+                border: none;
+                border-radius: 8px;
+                color: #e4e6eb;
+            }
+
+            QTreeWidget#sourceContainerTree::item {
+                min-height: 30px;
+                padding: 3px;
+            }
+
+            QTreeWidget#sourceContainerTree::item:selected {
+                background: #403a73;
+            }
+        """)
+        results_layout.addWidget(self.container_tree)
 
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels([
@@ -2957,6 +3253,8 @@ class ReferenceSyncWindow(QMainWindow):
         self.update_source_interface()
 
         if changed:
+            self.reset_container_tree()
+
             self.thumbnail_controller.clear()
             self.table.setRowCount(0)
             self.preview_items = []
@@ -2978,12 +3276,18 @@ class ReferenceSyncWindow(QMainWindow):
         )
         browser_mode = self.browser_source.isChecked()
 
-        self.browser_source.setVisible(
-            not pinterest_mode
+        self.browser_source.setVisible(True)
+        self.meta_source.setVisible(True)
+
+        self.browser_source.setText(
+            "Через авторизованный браузер"
         )
-        self.meta_source.setVisible(
-            not pinterest_mode
+        self.meta_source.setText(
+            "Из архива Pinterest"
+            if pinterest_mode
+            else "Из архива Meta"
         )
+
         self.browser_panel.setVisible(
             not pinterest_mode and browser_mode
         )
@@ -2991,7 +3295,10 @@ class ReferenceSyncWindow(QMainWindow):
             not pinterest_mode and not browser_mode
         )
         self.pinterest_panel.setVisible(
-            pinterest_mode
+            pinterest_mode and browser_mode
+        )
+        self.pinterest_archive_panel.setVisible(
+            pinterest_mode and not browser_mode
         )
         self.search_card.setVisible(True)
         self.filters_group.setVisible(
@@ -3002,16 +3309,495 @@ class ReferenceSyncWindow(QMainWindow):
             self.source_title.setText(
                 "1. Источник Pinterest"
             )
-            self.search_button.setText(
-                "Найти новые публикации"
-            )
         else:
             self.source_title.setText(
                 "1. Источник Instagram"
             )
+
+        if self.selected_folders_toggle.isChecked():
+            self.search_button.setText(
+                "Показать папки"
+            )
+        else:
             self.search_button.setText(
                 "Найти новые публикации"
             )
+
+    def show_folder_search_info(self) -> None:
+        QMessageBox.information(
+            self,
+            "Поиск в выбранных папках",
+            "При включении этого режима ReferenceSync сначала "
+            "найдёт доступные доски, коллекции и разделы. "
+            "Выберите нужные папки и нажмите «Продолжить». "
+            "После этого выбранный режим поиска будет применён "
+            "только к содержимому отмеченных папок.\n\n"
+            "Если режим выключен, поиск выполняется по общему "
+            "списку всех сохранённых публикаций.",
+        )
+
+    def folder_search_toggled(
+        self,
+        enabled: bool,
+    ) -> None:
+        self.reset_container_tree()
+
+        if enabled:
+            self.search_button.setText("Показать папки")
+            self.status.setText(
+                "Сначала покажем папки источника"
+            )
+        else:
+            self.search_button.setText(
+                "Найти новые публикации"
+            )
+            self.status.setText(
+                "Поиск выполняется по общему списку"
+            )
+
+
+    def reset_container_tree(self) -> None:
+        self._folder_search_ready = False
+        self._updating_container_tree = True
+
+        try:
+            self.container_tree.clear()
+        finally:
+            self._updating_container_tree = False
+
+        self.container_tree.setVisible(False)
+        self.table.setVisible(True)
+        self.continue_folders_button.setVisible(False)
+        self.continue_folders_button.setEnabled(False)
+        self.container_payload = None
+        self.selected_container_records = []
+
+    def start_container_preview(self) -> None:
+        if not self.browser_source.isChecked():
+            QMessageBox.information(
+                self,
+                "Архив пока не подключён",
+                "Выбор папок из архива будет доступен "
+                "после подключения архивного парсера.",
+            )
+            return
+
+        if self.active_source == "pinterest":
+            username = (
+                self.pinterest_username.text()
+                .strip()
+                .lstrip("@")
+            )
+            browser = (
+                self.pinterest_browser.currentData()
+                or "chrome"
+            )
+            missing_text = (
+                "Введите имя Pinterest-аккаунта после @."
+            )
+        else:
+            username = (
+                self.username.text().strip().lstrip("@")
+            )
+            browser = (
+                self.browser.currentData() or "chrome"
+            )
+            missing_text = (
+                "Введите Instagram-никнейм после @."
+            )
+
+        if not username:
+            QMessageBox.warning(
+                self,
+                "Не указан аккаунт",
+                missing_text,
+            )
+            return
+
+        output = (
+            Path("/tmp")
+            / (
+                "reference_sync_containers_"
+                + self.active_source
+                + "_"
+                + datetime.now().strftime(
+                    "%Y%m%d_%H%M%S_%f"
+                )
+                + ".json"
+            )
+        )
+
+        arguments = [
+            "-m",
+            "app.source_container_preview",
+            "--source",
+            self.active_source,
+            "--username",
+            username,
+            "--browser",
+            str(browser),
+            "--output",
+            str(output),
+        ]
+
+        self.reset_container_tree()
+        self.container_preview_output = output
+        self.active_operation_source = "containers"
+        self.process_output = ""
+        self._process_line_buffer = ""
+        self.log.clear()
+        self.process_started_at = datetime.now().timestamp()
+
+        self.table.setVisible(False)
+        self.operation_progress.setVisible(True)
+        self.operation_progress.setRange(0, 0)
+        self.operation_progress.setFormat(
+            "Получаем список папок…"
+        )
+        self.search_button.setEnabled(False)
+        self.status.setText(
+            "Получаем доступные папки источника…"
+        )
+        self.summary.setText("Папки: —")
+
+        self.process = QProcess(self)
+        self.process.setWorkingDirectory(str(PROJECT))
+        self.process.setProgram(str(PYTHON))
+        self.process.setArguments(arguments)
+        self.process.setProcessChannelMode(
+            QProcess.ProcessChannelMode.MergedChannels
+        )
+        self.process.readyReadStandardOutput.connect(
+            self.read_process_output
+        )
+        self.process.finished.connect(
+            self.preview_finished
+        )
+        self.process.start()
+
+    def finish_container_preview(
+        self,
+        exit_code: int,
+    ) -> None:
+        output = self.container_preview_output
+        self.active_operation_source = None
+        self.container_preview_output = None
+        self.operation_progress.setVisible(False)
+
+        if (
+            exit_code != 0
+            or output is None
+            or not output.is_file()
+        ):
+            self.table.setVisible(True)
+            self.status.setText(
+                "Не удалось получить список папок"
+            )
+            self.log.setVisible(True)
+            self.log_button.setChecked(True)
+            return
+
+        try:
+            payload = json.loads(
+                output.read_text(encoding="utf-8")
+            )
+        except Exception as error:
+            self.table.setVisible(True)
+            self.status.setText(
+                "Не удалось прочитать дерево папок"
+            )
+            self.log.append(str(error))
+            self.log.setVisible(True)
+            self.log_button.setChecked(True)
+            return
+        finally:
+            output.unlink(missing_ok=True)
+
+        if payload.get("status") != "SUCCESS":
+            self.table.setVisible(True)
+            self.status.setText(
+                str(
+                    payload.get("error")
+                    or "Получение папок завершилось с ошибкой"
+                )
+            )
+            return
+
+        self.container_payload = payload
+        self.populate_container_tree(
+            payload.get("root") or {}
+        )
+
+    def populate_container_tree(
+        self,
+        root: dict,
+    ) -> None:
+        self._updating_container_tree = True
+        self.container_tree.clear()
+
+        try:
+            if not isinstance(root, dict) or not root:
+                raise ValueError(
+                    "Источник не вернул корневой контейнер"
+                )
+
+            def add_node(
+                parent,
+                record: dict,
+            ) -> QTreeWidgetItem:
+                name = str(
+                    record.get("name") or "Без названия"
+                )
+                container_type = str(
+                    record.get("type") or "container"
+                )
+                metadata = record.get("metadata") or {}
+                count = (
+                    metadata.get("media_count")
+                    if container_type == "collection"
+                    else metadata.get("pin_count")
+                )
+
+                item = QTreeWidgetItem([
+                    name,
+                    container_type,
+                    "" if count is None else str(count),
+                ])
+                item.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    record,
+                )
+
+                if bool(record.get("selectable", True)):
+                    item.setFlags(
+                        item.flags()
+                        | Qt.ItemFlag.ItemIsUserCheckable
+                    )
+                    item.setCheckState(
+                        0,
+                        Qt.CheckState.Unchecked,
+                    )
+
+                if parent is None:
+                    self.container_tree.addTopLevelItem(
+                        item
+                    )
+                else:
+                    parent.addChild(item)
+
+                for child in record.get("children") or []:
+                    if isinstance(child, dict):
+                        add_node(item, child)
+
+                return item
+
+            top = add_node(None, root)
+            top.setExpanded(True)
+
+            for index in range(top.childCount()):
+                top.child(index).setExpanded(True)
+
+        finally:
+            self._updating_container_tree = False
+
+        self._folder_search_ready = True
+        self.table.setVisible(False)
+        self.container_tree.setVisible(True)
+        self.continue_folders_button.setVisible(True)
+        self.continue_folders_button.setEnabled(False)
+
+        total = int(
+            self.container_payload.get(
+                "container_count",
+                0,
+            )
+        )
+        self.summary.setText(f"Папки: {total}")
+        self.status.setText(
+            "Отметьте нужные папки и нажмите «Продолжить»"
+        )
+
+    def container_tree_item_changed(
+        self,
+        item: QTreeWidgetItem,
+        column: int,
+    ) -> None:
+        if self._updating_container_tree or column != 0:
+            return
+
+        if not (
+            item.flags()
+            & Qt.ItemFlag.ItemIsUserCheckable
+        ):
+            return
+
+        state = item.checkState(0)
+        self._updating_container_tree = True
+
+        try:
+            def apply_children(
+                parent: QTreeWidgetItem,
+            ) -> None:
+                for index in range(parent.childCount()):
+                    child = parent.child(index)
+
+                    if (
+                        child.flags()
+                        & Qt.ItemFlag.ItemIsUserCheckable
+                    ):
+                        child.setCheckState(0, state)
+
+                    apply_children(child)
+
+            apply_children(item)
+        finally:
+            self._updating_container_tree = False
+
+        self.refresh_container_selection()
+
+    def refresh_container_selection(self) -> None:
+        selected = []
+
+        def visit(
+            item: QTreeWidgetItem,
+            ancestor_selected: bool = False,
+        ) -> None:
+            checkable = bool(
+                item.flags()
+                & Qt.ItemFlag.ItemIsUserCheckable
+            )
+            checked = (
+                checkable
+                and item.checkState(0)
+                == Qt.CheckState.Checked
+            )
+
+            record = item.data(
+                0,
+                Qt.ItemDataRole.UserRole,
+            )
+
+            if (
+                checked
+                and not ancestor_selected
+                and isinstance(record, dict)
+            ):
+                selected.append(record)
+
+            inherited = ancestor_selected or checked
+
+            for index in range(item.childCount()):
+                visit(item.child(index), inherited)
+
+        for index in range(
+            self.container_tree.topLevelItemCount()
+        ):
+            visit(
+                self.container_tree.topLevelItem(index)
+            )
+
+        self.selected_container_records = selected
+        self.continue_folders_button.setEnabled(
+            bool(selected)
+        )
+        self.status.setText(
+            (
+                f"Выбрано папок: {len(selected)}"
+                if selected
+                else "Отметьте хотя бы одну папку"
+            )
+        )
+
+    def continue_with_selected_folders(self) -> None:
+        if not self._folder_search_ready:
+            return
+
+        self.refresh_container_selection()
+
+        if not self.selected_container_records:
+            QMessageBox.warning(
+                self,
+                "Папки не выбраны",
+                "Отметьте хотя бы одну папку.",
+            )
+            return
+
+        selected_names = [
+            str(item.get("name") or item.get("id"))
+            for item in self.selected_container_records
+        ]
+
+        self.status.setText(
+            "Папки выбраны — подготовка поиска публикаций"
+        )
+        self.summary.setText(
+            f"Выбрано папок: {len(selected_names)}"
+        )
+        self.log.setPlainText(
+            "Выбранные папки:\n"
+            + "\n".join(
+                f"• {name}"
+                for name in selected_names
+            )
+            + "\n\n"
+            + "Поиск публикаций не запущен: "
+            + "ожидается подключение folder-aware backend."
+        )
+
+        QMessageBox.information(
+            self,
+            "Папки выбраны",
+            "Выбор сохранён. На этом безопасном этапе "
+            "публикации ещё не загружаются.",
+        )
+
+    def format_author_field(
+        self,
+        field: QLineEdit,
+    ) -> None:
+        original = field.text()
+        cursor = field.cursorPosition()
+
+        parts = original.split(",")
+        formatted = []
+
+        for part in parts:
+            stripped = part.strip()
+
+            if not stripped:
+                formatted.append("")
+            else:
+                formatted.append(
+                    "@"
+                    + stripped.lstrip("@")
+                )
+
+        result = ", ".join(formatted)
+
+        if original.endswith(","):
+            result = result.rstrip() + ", @"
+        elif original.endswith(", "):
+            result = result.rstrip() + ", @"
+
+        if result == original:
+            return
+
+        field.blockSignals(True)
+
+        try:
+            field.setText(result)
+            field.setCursorPosition(
+                min(
+                    len(result),
+                    cursor + max(
+                        0,
+                        len(result) - len(original),
+                    ),
+                )
+            )
+        finally:
+            field.blockSignals(False)
 
     def update_search_interface(self) -> None:
         self.recent_limit.setEnabled(
@@ -3748,6 +4534,20 @@ class ReferenceSyncWindow(QMainWindow):
 
         super().closeEvent(event)
 
+    def choose_pinterest_archive(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Выберите архив Pinterest",
+            str(Path.home() / "Downloads"),
+            (
+                "Pinterest archive (*.zip *.json);;"
+                "All files (*)"
+            ),
+        )
+
+        if path:
+            self.pinterest_archive_path.setText(path)
+
     def choose_meta_archive(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -3768,6 +4568,16 @@ class ReferenceSyncWindow(QMainWindow):
 
     def start_preview(self) -> None:
         if self.process is not None:
+            return
+
+        if self.selected_folders_toggle.isChecked():
+            if not self._folder_search_ready:
+                self.start_container_preview()
+                return
+
+            self.status.setText(
+                "Выберите папки и нажмите «Продолжить»"
+            )
             return
 
         if self.active_source == "pinterest":
@@ -3881,18 +4691,34 @@ class ReferenceSyncWindow(QMainWindow):
         self.process.start()
 
     def start_pinterest_preview(self) -> None:
-        url = self.pinterest_url.text().strip()
-
-        if (
-            not url.startswith(("http://", "https://"))
-            or "pinterest." not in url.lower()
-        ):
-            QMessageBox.warning(
+        if not self.browser_source.isChecked():
+            QMessageBox.information(
                 self,
-                "Неверная ссылка",
-                "Вставьте ссылку Pinterest.",
+                "Архив Pinterest",
+                "Парсер официального архива Pinterest "
+                "пока не подключён.",
             )
             return
+
+        username = (
+            self.pinterest_username.text()
+            .strip()
+            .lstrip("@")
+        )
+
+        if not username:
+            QMessageBox.warning(
+                self,
+                "Не указан аккаунт",
+                "Введите имя Pinterest-аккаунта после @.",
+            )
+            return
+
+        url = (
+            "https://www.pinterest.com/"
+            + username
+            + "/"
+        )
 
         job_id = (
             "pinterest-gui-preview-"
@@ -4469,6 +5295,11 @@ class ReferenceSyncWindow(QMainWindow):
         self.process = None
         self.search_button.setEnabled(True)
 
+        if operation_source == "containers":
+            self.finish_container_preview(
+                exit_code
+            )
+            return
         if operation_source == "pinterest":
             self.finish_pinterest_preview(
                 exit_code
@@ -4638,24 +5469,37 @@ class ReferenceSyncWindow(QMainWindow):
             if username in excluded:
                 continue
 
-            component_count = int(
-                item.get("component_count") or 1
+            try:
+                component_count = int(
+                    item.get("component_count")
+                    or item.get(
+                        "total_component_count"
+                    )
+                    or 1
+                )
+            except (TypeError, ValueError):
+                component_count = 1
+
+            type_text = " ".join([
+                str(item.get("publication_type") or ""),
+                str(item.get("post_type") or ""),
+                str(item.get("type") or ""),
+                str(item.get("canonical_url") or ""),
+            ]).lower()
+
+            is_reel = (
+                "reel" in type_text
+                or "/reel/" in type_text
             )
+            is_carousel = component_count > 1
 
-            structure = (
-                self.structure_filter.currentText()
-            )
-
-            if (
-                structure == "Только одиночные"
-                and component_count > 1
-            ):
-                continue
-
-            if (
-                structure == "Только карусели"
-                and component_count <= 1
-            ):
+            if is_carousel:
+                if not self.include_carousels.isChecked():
+                    continue
+            elif is_reel:
+                if not self.include_reels.isChecked():
+                    continue
+            elif not self.include_posts.isChecked():
                 continue
 
             result.append(item)
@@ -5798,11 +6642,14 @@ class ReferenceSyncWindow(QMainWindow):
         # browser selector. All other controls retain their
         # original wheel behavior.
         if (
-            watched is getattr(
-                self,
-                "browser",
-                None,
-            )
+            watched in {
+                getattr(self, "browser", None),
+                getattr(
+                    self,
+                    "pinterest_browser",
+                    None,
+                ),
+            }
             and event.type()
             == QEvent.Type.Wheel
         ):
