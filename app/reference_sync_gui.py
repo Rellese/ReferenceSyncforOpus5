@@ -13,6 +13,7 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
+from app.version import VERSION_LABEL, WINDOW_TITLE
 
 from PySide6.QtCore import (
     QEvent,
@@ -1482,6 +1483,9 @@ class ReferenceSyncWindow(QMainWindow):
         self.process_started_at = 0.0
         self.preview_items: list[dict] = []
         self._operation_last_percent = 0
+        self.active_source = "instagram"
+        self.active_operation_source = None
+        self.pinterest_preview_output = None
 
         # V6.4.8 STAGE6.2 CLEAN_EXIT_SESSION_CLEANUP
         #
@@ -1513,7 +1517,7 @@ class ReferenceSyncWindow(QMainWindow):
         )
 
         self.setWindowTitle(
-            "ReferenceSync — Alpha 0.2"
+            WINDOW_TITLE
         )
         # ALPHA02_DEFAULT_WINDOW_V55
         self.resize(1600, 1000)
@@ -1561,7 +1565,7 @@ class ReferenceSyncWindow(QMainWindow):
         header.addLayout(title_box)
         header.addStretch()
 
-        alpha = QLabel("ALPHA 0.2")
+        alpha = QLabel(VERSION_LABEL)
         alpha.setObjectName("alphaBadge")
         header.addWidget(alpha)
 
@@ -1578,6 +1582,7 @@ class ReferenceSyncWindow(QMainWindow):
         platform_layout.addWidget(section_label)
 
         self.platform_buttons = []
+        self.platform_button_by_source = {}
 
         for short_name, full_name, active in PLATFORMS:
             button = QPushButton(short_name)
@@ -1593,7 +1598,20 @@ class ReferenceSyncWindow(QMainWindow):
             )
             button.setFixedSize(48, 43)
 
-            if not active:
+            source_code = full_name.lower()
+
+            if source_code in {
+                "instagram",
+                "pinterest",
+            }:
+                self.platform_button_by_source[
+                    source_code
+                ] = button
+                button.clicked.connect(
+                    lambda checked=False, code=source_code:
+                    self.switch_platform(code)
+                )
+            else:
                 button.clicked.connect(
                     lambda checked=False, name=full_name:
                     self.show_future_platform(name)
@@ -1604,9 +1622,15 @@ class ReferenceSyncWindow(QMainWindow):
 
         platform_layout.addStretch()
 
-        active_platform = QLabel("Instagram")
-        active_platform.setObjectName("activePlatformLabel")
-        platform_layout.addWidget(active_platform)
+        self.active_platform_label = QLabel(
+            "Instagram"
+        )
+        self.active_platform_label.setObjectName(
+            "activePlatformLabel"
+        )
+        platform_layout.addWidget(
+            self.active_platform_label
+        )
 
         main.addWidget(platform_card)
 
@@ -1666,9 +1690,9 @@ class ReferenceSyncWindow(QMainWindow):
         source_layout.setContentsMargins(20, 18, 20, 18)
         source_layout.setSpacing(12)
 
-        source_title = QLabel("1. Откуда получить данные")
-        source_title.setObjectName("sectionTitle")
-        source_layout.addWidget(source_title)
+        self.source_title = QLabel("1. Откуда получить данные")
+        self.source_title.setObjectName("sectionTitle")
+        source_layout.addWidget(self.source_title)
 
         self.browser_source = QRadioButton(
             "Через авторизованный браузер"
@@ -1828,10 +1852,88 @@ class ReferenceSyncWindow(QMainWindow):
         meta_layout.addWidget(meta_hint)
 
         source_layout.addWidget(self.meta_panel)
+
+        self.pinterest_panel = QFrame()
+        pinterest_layout = QVBoxLayout(
+            self.pinterest_panel
+        )
+        pinterest_layout.setContentsMargins(
+            0, 8, 0, 0
+        )
+        pinterest_layout.setSpacing(10)
+
+        pinterest_layout.addWidget(
+            QLabel("Ссылка Pinterest")
+        )
+
+        self.pinterest_url = QLineEdit()
+        self.pinterest_url.setPlaceholderText(
+            "https://www.pinterest.com/pin/..."
+        )
+        pinterest_layout.addWidget(
+            self.pinterest_url
+        )
+
+        pinterest_layout.addWidget(
+            QLabel("Браузер")
+        )
+
+        self.pinterest_browser = QComboBox()
+        self.pinterest_browser.addItem(
+            "Google Chrome",
+            "chrome",
+        )
+        self.pinterest_browser.addItem(
+            "Яндекс",
+            "yandex",
+        )
+        self.pinterest_browser.addItem(
+            "Safari",
+            "safari",
+        )
+        self.pinterest_browser.addItem(
+            "Firefox",
+            "firefox",
+        )
+        pinterest_layout.addWidget(
+            self.pinterest_browser
+        )
+
+        pinterest_layout.addWidget(
+            QLabel("Скорость загрузки")
+        )
+
+        self.pinterest_download_speed = QComboBox()
+
+        for index in range(
+            self.download_speed.count()
+        ):
+            self.pinterest_download_speed.addItem(
+                self.download_speed.itemText(index),
+                self.download_speed.itemData(index),
+            )
+        pinterest_layout.addWidget(
+            self.pinterest_download_speed
+        )
+
+        pinterest_hint = QLabel(
+            "Вставьте ссылку на Pin, доску "
+            "или раздел доски."
+        )
+        pinterest_hint.setObjectName("hint")
+        pinterest_hint.setWordWrap(True)
+        pinterest_layout.addWidget(
+            pinterest_hint
+        )
+
+        source_layout.addWidget(
+            self.pinterest_panel
+        )
         left.addWidget(source_card)
 
         # Search mode
         search_card = self.make_card()
+        self.search_card = search_card
         search_layout = QVBoxLayout(search_card)
         search_layout.setContentsMargins(20, 18, 20, 18)
         search_layout.setSpacing(10)
@@ -2794,10 +2896,122 @@ class ReferenceSyncWindow(QMainWindow):
             "ReferenceSync.",
         )
 
+    # PINTEREST_GUI_CONNECTION_V1
+    def switch_platform(
+        self,
+        source_code: str,
+    ) -> None:
+        source_code = str(
+            source_code or ""
+        ).strip().lower()
+
+        if source_code not in {
+            "instagram",
+            "pinterest",
+        }:
+            return
+
+        if self.process is not None:
+            QMessageBox.information(
+                self,
+                "Операция выполняется",
+                "Сначала дождитесь завершения операции.",
+            )
+            return
+
+        changed = source_code != self.active_source
+        self.active_source = source_code
+
+        for code, button in (
+            self.platform_button_by_source.items()
+        ):
+            selected = code == source_code
+            button.setObjectName(
+                "activePlatform"
+                if selected
+                else "futurePlatform"
+            )
+            button.setProperty(
+                "platformActive",
+                selected,
+            )
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
+
+        if source_code == "pinterest":
+            self.active_platform_label.setText(
+                "Pinterest"
+            )
+            self.numbering_text.setText(
+                "pinorder-"
+            )
+        else:
+            self.active_platform_label.setText(
+                "Instagram"
+            )
+            self.numbering_text.setText(
+                "instpoporder-"
+            )
+
+        self.update_source_interface()
+
+        if changed:
+            self.thumbnail_controller.clear()
+            self.table.setRowCount(0)
+            self.preview_items = []
+            self.naming_group.setVisible(False)
+            self.import_button.setEnabled(False)
+            self.clear_results_button.setEnabled(False)
+            self.select_all.blockSignals(True)
+            self.select_all.setChecked(False)
+            self.select_all.blockSignals(False)
+            self.summary.setText("Найдено: 0")
+            self.status.setText(
+                "Выбран источник: "
+                + self.active_platform_label.text()
+            )
+
     def update_source_interface(self) -> None:
+        pinterest_mode = (
+            self.active_source == "pinterest"
+        )
         browser_mode = self.browser_source.isChecked()
-        self.browser_panel.setVisible(browser_mode)
-        self.meta_panel.setVisible(not browser_mode)
+
+        self.browser_source.setVisible(
+            not pinterest_mode
+        )
+        self.meta_source.setVisible(
+            not pinterest_mode
+        )
+        self.browser_panel.setVisible(
+            not pinterest_mode and browser_mode
+        )
+        self.meta_panel.setVisible(
+            not pinterest_mode and not browser_mode
+        )
+        self.pinterest_panel.setVisible(
+            pinterest_mode
+        )
+        self.search_card.setVisible(True)
+        self.filters_group.setVisible(
+            not pinterest_mode
+        )
+
+        if pinterest_mode:
+            self.source_title.setText(
+                "1. Источник Pinterest"
+            )
+            self.search_button.setText(
+                "Найти новые публикации"
+            )
+        else:
+            self.source_title.setText(
+                "1. Источник Instagram"
+            )
+            self.search_button.setText(
+                "Найти новые публикации"
+            )
 
     def update_search_interface(self) -> None:
         self.recent_limit.setEnabled(
@@ -3556,6 +3770,10 @@ class ReferenceSyncWindow(QMainWindow):
         if self.process is not None:
             return
 
+        if self.active_source == "pinterest":
+            self.start_pinterest_preview()
+            return
+
         if self.meta_source.isChecked():
             if not self.meta_path.text():
                 QMessageBox.warning(
@@ -3661,6 +3879,193 @@ class ReferenceSyncWindow(QMainWindow):
             self.preview_finished
         )
         self.process.start()
+
+    def start_pinterest_preview(self) -> None:
+        url = self.pinterest_url.text().strip()
+
+        if (
+            not url.startswith(("http://", "https://"))
+            or "pinterest." not in url.lower()
+        ):
+            QMessageBox.warning(
+                self,
+                "Неверная ссылка",
+                "Вставьте ссылку Pinterest.",
+            )
+            return
+
+        job_id = (
+            "pinterest-gui-preview-"
+            + datetime.now().strftime(
+                "%Y%m%d-%H%M%S"
+            )
+        )
+        output = (
+            Path("/tmp")
+            / f"{job_id}.json"
+        )
+
+        arguments = [
+            "-m",
+            "app.source_download_staging",
+            "preview",
+            "--source-code",
+            "pinterest",
+            "--job-id",
+            job_id,
+            "--url",
+            url,
+            "--limit",
+            "1",
+            "--cookies-browser",
+            str(
+                self.pinterest_browser.currentData()
+                or "chrome"
+            ),
+            "--output",
+            str(output),
+        ]
+
+        self.active_operation_source = "pinterest"
+        self.pinterest_preview_output = output
+        self.process_output = ""
+        self._process_line_buffer = ""
+        self.log.clear()
+        self.table.setRowCount(0)
+        self.preview_items = []
+        self.import_button.setEnabled(False)
+        self.clear_results_button.setEnabled(False)
+        self.search_button.setEnabled(False)
+        self.status.setText(
+            "Проверяем план Pinterest"
+        )
+        self.summary.setText("Проверка ссылки")
+        self.operation_progress.setVisible(True)
+        self.operation_progress.setRange(0, 0)
+        self.operation_progress.setFormat(
+            "Pinterest preview"
+        )
+        self.process_started_at = (
+            datetime.now().timestamp()
+        )
+
+        self.process = QProcess(self)
+        self.process.setWorkingDirectory(
+            str(PROJECT)
+        )
+        self.process.setProgram(str(PYTHON))
+        self.process.setArguments(arguments)
+        self.process.setProcessChannelMode(
+            QProcess.ProcessChannelMode.MergedChannels
+        )
+        self.process.readyReadStandardOutput.connect(
+            self.read_process_output
+        )
+        self.process.finished.connect(
+            self.preview_finished
+        )
+        self.process.start()
+
+    def finish_pinterest_preview(
+        self,
+        exit_code: int,
+    ) -> None:
+        output = self.pinterest_preview_output
+        self.active_operation_source = None
+        self.operation_progress.setVisible(False)
+
+        if (
+            exit_code != 0
+            or output is None
+            or not output.is_file()
+        ):
+            self.status.setText(
+                "Pinterest preview завершился с ошибкой"
+            )
+            self.log.setVisible(True)
+            self.log_button.setChecked(True)
+            return
+
+        try:
+            payload = json.loads(
+                output.read_text(encoding="utf-8")
+            )
+        except Exception as error:
+            self.status.setText(
+                "Не удалось прочитать Pinterest preview"
+            )
+            self.log.append(str(error))
+            self.log.setVisible(True)
+            self.log_button.setChecked(True)
+            return
+
+        status = str(
+            payload.get("status") or ""
+        )
+        url = str(
+            payload.get("source_url")
+            or self.pinterest_url.text().strip()
+        )
+
+        if status != "PREVIEW_ONLY":
+            self.status.setText(
+                f"Pinterest: {status or 'неизвестный статус'}"
+            )
+            self.log.setVisible(True)
+            self.log_button.setChecked(True)
+            return
+
+        self.table.setRowCount(1)
+
+        selector = LightweightRowSelectorItem()
+        selector.setCheckState(
+            Qt.CheckState.Unchecked
+        )
+        selector.setFlags(
+            selector.flags()
+            & ~Qt.ItemFlag.ItemIsEnabled
+        )
+        selector.setToolTip(
+            "Импорт включим после проверки интерфейса."
+        )
+        self.table.setItem(0, 0, selector)
+
+        values = [
+            "Pinterest",
+            "Ссылка",
+            "Preview",
+            url,
+            "Eagle не изменён",
+        ]
+
+        for column, value in enumerate(
+            values,
+            start=1,
+        ):
+            cell = QTableWidgetItem(value)
+            self.table.setItem(
+                0,
+                column,
+                cell,
+            )
+
+        self.preview_items = []
+        self.select_all.blockSignals(True)
+        self.select_all.setChecked(False)
+        self.select_all.blockSignals(False)
+        self.import_button.setEnabled(False)
+        self.clear_results_button.setEnabled(True)
+        self.summary.setText("Pinterest: 1 ссылка")
+        self.status.setText(
+            "Pinterest preview готов"
+        )
+        self.log.setPlainText(
+            "Источник: Pinterest\n"
+            f"Ссылка: {url}\n"
+            "Сеть: не использовалась\n"
+            "Eagle: без изменений\n"
+            "SQLite: без изменений\n"
+        )
 
     def write_process_control(
         self,
@@ -4057,8 +4462,18 @@ class ReferenceSyncWindow(QMainWindow):
             f"{completed_seconds:02d}"
         )
 
+        operation_source = (
+            self.active_operation_source
+        )
+
         self.process = None
         self.search_button.setEnabled(True)
+
+        if operation_source == "pinterest":
+            self.finish_pinterest_preview(
+                exit_code
+            )
+            return
         if exit_code == 0:
             self.search_duration_info.setToolTip(
                 "Длительность поиска — "
@@ -5653,6 +6068,15 @@ class ReferenceSyncWindow(QMainWindow):
 
     def start_import(self) -> None:
         if self.process is not None:
+            return
+
+        if self.active_source == "pinterest":
+            QMessageBox.information(
+                self,
+                "Pinterest preview",
+                "Импорт включим после проверки "
+                "таблицы и иерархии.",
+            )
             return
 
         selected = self.selected_preview_items()
