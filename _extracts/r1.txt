@@ -1,0 +1,64 @@
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels([
+            "",
+            "Автор",
+            "Тип",
+            "Структура",
+            "Название",
+            "Описание",
+        ])
+        # FIXED_ROWS_FITTING_COLUMNS_V43
+        vertical_header = self.table.verticalHeader()
+        vertical_header.setVisible(False)
+        vertical_header.setSectionResizeMode(
+            QHeaderView.ResizeMode.Fixed
+        )
+        vertical_header.setDefaultSectionSize(76)
+        vertical_header.setMinimumSectionSize(76)
+        vertical_header.setMaximumSectionSize(76)
+
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+
+        # Smooth table scrolling instead of jumping one
+        # complete publication at a time.
+        self.table.setVerticalScrollMode(
+            QTableWidget.ScrollMode.ScrollPerPixel
+        )
+        self.table.setHorizontalScrollMode(
+            QTableWidget.ScrollMode.ScrollPerPixel
+        )
+        self.table.verticalScrollBar().setSingleStep(12)
+        self.table.horizontalScrollBar().setSingleStep(12)
+
+        # CENTERED_ROW_SELECTOR_AND_RESIZABLE_TEXT_V42
+        self.lightweight_row_selector_delegate = (
+            LightweightRowSelectorDelegate(self.table)
+        )
+        self.table.setItemDelegateForColumn(
+            0,
+            self.lightweight_row_selector_delegate,
+        )
+
+        # LIGHTWEIGHT_STRUCTURE_CONTROLS_V3
+        # One shared delegate replaces persistent QPushButton
+        # widgets in the Structure column.
+        self.lightweight_structure_delegate = (
+            LightweightStructureDelegate(
+                self.open_carousel_selection,
+                self.table,
+            )
+        )
+        self.table.setItemDelegateForColumn(
+            3,
+            self.lightweight_structure_delegate,
+        )
+
+        # GLOBAL_COMMITTED_TABLE_UNDO_V52_FIXED
+        # History contains only user edits committed by the
+        # temporary table text editor.
+        self._text_undo_stack = []
+        self._text_redo_stack = []
+        self._text_history_limit = 500

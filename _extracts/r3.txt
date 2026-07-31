@@ -1,0 +1,46 @@
+        self,
+        collisions: list[dict],
+    ) -> None:
+        self.table.setRowCount(len(collisions))
+        self.clear_results_button.setEnabled(
+            bool(collisions)
+        )
+
+        for row, collision in enumerate(collisions):
+            values = [
+                "—",
+                "—",
+                "Занятый номер",
+                str(collision.get("name") or ""),
+                "Конфликт нумерации",
+            ]
+
+            for column, value in enumerate(
+                values,
+                start=1,
+            ):
+                self.table.setItem(
+                    row,
+                    column,
+                    QTableWidgetItem(value),
+                )
+
+    def selected_component_indexes(
+        self,
+        item: dict,
+    ) -> list[int]:
+        values = item.get("selected_components")
+        imported = {
+            int(value)
+            for value in item.get(
+                "imported_component_numbers",
+                [],
+            )
+            if str(value).isdigit()
+        }
+
+        if isinstance(values, list):
+            result = []
+
+            for value in values:
+                try:

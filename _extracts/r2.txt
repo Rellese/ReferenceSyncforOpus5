@@ -1,0 +1,71 @@
+
+                component_indexes.append(component_index)
+
+            if not component_indexes:
+                component_indexes = list(
+                    range(1, component_count + 1)
+                )
+
+            existing_selection = item.get(
+                "selected_components"
+            )
+
+            if not isinstance(existing_selection, list):
+                item["selected_components"] = list(
+                    component_indexes
+                )
+
+            values = [
+                str(item.get("username") or ""),
+                media_type,
+            ]
+
+            for column, value in enumerate(
+                values,
+                start=1,
+            ):
+                cell = QTableWidgetItem(value)
+
+                if column == 2:
+                    cell.setTextAlignment(
+                        Qt.AlignmentFlag.AlignCenter
+                    )
+
+                self.table.setItem(
+                    row,
+                    column,
+                    cell,
+                )
+
+            structure_cell = QTableWidgetItem()
+            structure_cell.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter
+            )
+            structure_cell.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+            )
+
+            if component_count > 1:
+                structure_cell.setData(
+                    LightweightStructureDelegate.ROLE_CAROUSEL,
+                    True,
+                )
+                structure_cell.setData(
+                    LightweightStructureDelegate
+                    .ROLE_CONTROL_ENABLED,
+                    True,
+                )
+            else:
+                structure_cell.setText("Одиночный")
+                structure_cell.setData(
+                    LightweightStructureDelegate.ROLE_CAROUSEL,
+                    False,
+                )
+                structure_cell.setData(
+                    LightweightStructureDelegate
+                    .ROLE_CONTROL_ENABLED,
+                    False,
+                )
+
+            self.table.setItem(

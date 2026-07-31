@@ -1,0 +1,56 @@
+        else:
+            handled = self.undo_committed_text_edit()
+
+        if handled:
+            event.accept()
+            return True
+
+        return super().eventFilter(
+            watched,
+            event,
+        )
+
+    def table_text_item_changed(
+        self,
+        item: QTableWidgetItem,
+    ) -> None:
+        if isinstance(
+            item,
+            LightweightRowSelectorItem,
+        ):
+            if not self._populating_results:
+                self.selection_changed()
+            return
+
+        if not isinstance(
+            item,
+            LightweightTextItem,
+        ):
+            return
+
+        item.handle_text_changed()
+
+        if self._populating_results:
+            return
+
+        self.table.resizeRowToContents(
+            item.row()
+        )
+
+    def editable_cell(
+        self,
+        row: int,
+        column: int,
+    ) -> LightweightTextItem | None:
+        item = self.table.item(
+            row,
+            column,
+        )
+
+        if isinstance(
+            item,
+            LightweightTextItem,
+        ):
+            return item
+
+        return None
