@@ -48,3 +48,6 @@ downloads/
 config/local.json
 /app/*.before_*
 *.py[cod]
+
+config/local.json
+/app/*.before_*
