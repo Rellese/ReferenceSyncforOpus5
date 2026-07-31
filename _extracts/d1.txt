@@ -1,0 +1,84 @@
+def run_gallery_dl(
+    command: list[str],
+    *,
+    mode: str,
+    scan_speed: str,
+    timeout_seconds: int,
+) -> subprocess.CompletedProcess[str]:
+    """
+    Execute gallery-dl and read its RS_GDL_POST side channel.
+
+    The main --dump-json output is still written to a temporary
+    file and parsed after completion, preserving all existing
+    discovery metadata and carousel handling.
+    """
+    marker_prefix = "RS_GDL_POST "
+
+    with tempfile.TemporaryDirectory(
+        prefix="reference_sync_discovery_"
+    ) as temporary_directory:
+        temporary = Path(temporary_directory)
+        stdout_path = temporary / "stdout.json"
+        stderr_path = temporary / "stderr.txt"
+
+        started = time.monotonic()
+        timed_out = False
+        posts_scanned = 0
+
+        environment = os.environ.copy()
+        environment[
+            "REFERENCE_SYNC_DISCOVERY_SPEED"
+        ] = str(scan_speed)
+        marker_buffer = ""
+        stderr_offset = 0
+
+        def read_progress_markers() -> None:
+            nonlocal posts_scanned
+            nonlocal marker_buffer
+            nonlocal stderr_offset
+
+            if not stderr_path.exists():
+                return
+
+            try:
+                with stderr_path.open("rb") as stream:
+                    stream.seek(stderr_offset)
+                    chunk = stream.read()
+                    stderr_offset = stream.tell()
+            except OSError:
+                return
+
+            if not chunk:
+                return
+
+            marker_buffer += chunk.decode(
+                "utf-8",
+                errors="replace",
+            )
+
+            while "\n" in marker_buffer:
+                line, marker_buffer = (
+                    marker_buffer.split(
+                        "\n",
+                        1,
+                    )
+                )
+
+                stripped = line.strip()
+
+                if not stripped.startswith(
+                    marker_prefix
+                ):
+                    continue
+
+                raw_payload = stripped[
+                    len(marker_prefix):
+                ]
+
+                try:
+                    payload = json.loads(
+                        raw_payload
+                    )
+                    count = int(
+                        payload.get("count") or 0
+                    )

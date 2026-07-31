@@ -1,0 +1,107 @@
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Read-only Instagram saved-post discovery. "
+            "No media files are downloaded."
+        )
+    )
+    parser.add_argument(
+        "--username",
+        required=True,
+        help="Your own Instagram username",
+    )
+    # UNLIMITED_SAVED_RETRIEVAL_V61
+    parser.add_argument(
+        "--search-mode",
+        choices=("recent", "smart", "full"),
+        default="recent",
+        help=(
+            "Saved discovery strategy. Full mode omits "
+            "--post-range and follows pagination to the end."
+        ),
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help=(
+            "Number of newest saved posts to inspect. "
+            "Ignored in full mode."
+        ),
+    )
+    parser.add_argument(
+        "--browser",
+        default=None,
+        help="Browser name for gallery-dl cookies",
+    )
+    parser.add_argument(
+        "--scan-speed",
+        choices=("safe", "balanced"),
+        default="safe",
+        help=(
+            "Instagram Saved pagination speed. "
+            "Balanced reduces randomized request intervals."
+        ),
+    )
+    args = parser.parse_args()
+
+    username = args.username.strip().lstrip("@")
+
+    if not USERNAME_RE.fullmatch(username):
+        raise SystemExit("Invalid Instagram username format")
+
+    if args.search_mode in {"full", "smart"}:
+        if args.limit < 0:
+            raise SystemExit(
+                "--limit cannot be negative in unlimited modes"
+            )
+    elif args.limit < 1 or args.limit > 500:
+        raise SystemExit(
+            "--limit must be between 1 and 500 "
+            "for recent mode"
+        )
+
+    config = load_config()
+    browser = (
+        args.browser
+        or config.get("browser")
+        or "firefox"
+    )
+
+    browser_cookie_source = (
+        gallery_dl_browser_spec(browser)
+    )
+    browser_details = public_browser_details(
+        browser
+    )
+
+    gallery_dl = shutil.which("gallery-dl")
+    if not gallery_dl:
+        raise FileNotFoundError(
+            "gallery-dl executable not found"
+        )
+
+    saved_url = (
+        f"https://www.instagram.com/"
+        f"{username}/saved/all-posts/"
+    )
+
+    # UNLIMITED_SAVED_RETRIEVAL_V61
+    command = [
+        sys.executable,
+        "-m",
+        "app.gallery_dl_progress",
+        "-X",
+        str(PREVIEW_EXTRACTORS_PATH),
+        "--config-ignore",
+        "--no-input",
+        "--cookies-from-browser",
+        browser_cookie_source,
+        "--simulate",
+        "--dump-json",
+    ]
+
+    # gallery-dl continues Instagram cursor pagination itself.
+    # Omitting --post-range is what makes full Saved discovery
+    # unlimited; 50 is not used as a total ceiling.
+    if args.search_mode == "recent":
