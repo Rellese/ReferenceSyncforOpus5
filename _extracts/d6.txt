@@ -1,0 +1,121 @@
+    REPORTS_PATH.mkdir(parents=True, exist_ok=True)
+
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    posts_path.write_text(
+        json.dumps(posts, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    log_path.write_text(
+        (
+            "STDERR\n"
+            "======\n"
+            f"{sanitized_stderr[-10000:]}\n\n"
+            "STDOUT PREVIEW\n"
+            "==============\n"
+            f"{sanitized_stdout[:5000]}"
+        ),
+        encoding="utf-8",
+    )
+
+    print(
+        "RS_PROGRESS "
+        + json.dumps(
+            {
+                "percent": 100,
+                "stage": (
+                    "Сканирование завершено"
+                ),
+                "indeterminate": False,
+                "current": len(posts),
+                "total": len(posts),
+                "new_posts": summary[
+                    "new_post_candidates"
+                ],
+                "known_posts": summary[
+                    "known_baseline_posts"
+                ],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        flush=True,
+    )
+
+    print(json.dumps({
+        "summary": summary,
+        "new_post_candidates": [
+            {
+                "post_id": post["post_id"],
+                "shortcode": post["post_shortcode"],
+                "post_url": post["post_url"],
+                "components": post[
+                    "component_count_returned"
+                ],
+                "component_items": post.get(
+                    "components",
+                    [],
+                ),
+                "media_ids": post.get(
+                    "media_ids",
+                    [],
+                ),
+                "component_numbers": post.get(
+                    "component_numbers",
+                    [],
+                ),
+                "resume_partial": post.get(
+                    "resume_partial",
+                    False,
+                ),
+                "restore_deleted": False,
+                "reimport_deleted_as_new": post.get(
+                    "reimport_deleted_as_new",
+                    False,
+                ),
+                "discovery_status": post.get(
+                    "discovery_status"
+                ),
+                "existing_post_number": post.get(
+                    "existing_post_number"
+                ),
+                "imported_component_numbers": post.get(
+                    "imported_component_numbers",
+                    [],
+                ),
+                "imported_media_ids": post.get(
+                    "imported_media_ids",
+                    [],
+                ),
+                "available_component_numbers": post.get(
+                    "available_component_numbers",
+                    [],
+                ),
+                "extensions": post["extension_counts"],
+                "username": post["username"],
+                "description": (
+                    post.get("description") or ""
+                ),
+            }
+            for post in posts
+            if post["discovery_status"]
+            in {
+                "NEW_POST_CANDIDATE",
+                "RESTORE_DELETED_POST",
+            }
+        ],
+        "outputs": {
+            "report": str(report_path),
+            "posts": str(posts_path),
+            "sanitized_log": str(log_path),
+        },
+        "safety": safety,
+    }, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()
