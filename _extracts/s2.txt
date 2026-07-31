@@ -1,0 +1,46 @@
+            workflow["discovery_manifest"] = (
+                args.discovery_manifest
+            )
+
+            print(json.dumps({
+                "status": "DISCOVERY_SNAPSHOT_REUSED",
+                "posts": len(saved_posts),
+                "discovery_repeated": False,
+                "eagle_items_created": 0,
+                "database_modified": False,
+            }, ensure_ascii=False, indent=2))
+        else:
+            discovery = run_module(
+                "app.instagram_discover",
+                [
+                    "--username",
+                    args.username,
+                    "--browser",
+                    args.browser,
+                    "--scan-speed",
+                    args.speed_profile,
+                    "--search-mode",
+                    args.search_mode,
+                    "--limit",
+                    str(args.limit),
+                ],
+                log_lines,
+            )
+
+        discovery_summary = discovery.get(
+            "summary",
+            {},
+        )
+
+        workflow["steps"].append({
+            "step": "DISCOVERY",
+            "status": discovery_summary.get(
+                "status"
+            ),
+            "logical_posts_returned": (
+                discovery_summary.get(
+                    "logical_posts_returned"
+                )
+            ),
+            "known_posts": discovery_summary.get(
+                "known_baseline_posts"

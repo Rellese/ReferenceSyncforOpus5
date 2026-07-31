@@ -1,0 +1,21 @@
+                    "--continue-numbering "
+                )
+            else:
+                numbering_argument = ""
+
+            next_command = (
+                "python -m app.instagram_sync "
+                f'--username "{args.username}" '
+                f'--browser "{args.browser}" '
+                f'--speed-profile "{args.speed_profile}" '
+                f'--search-mode "{args.search_mode}" '
+                f"--limit {args.limit} "
+                f"--batch-size "
+                f"{selected_preview_count} "
+                f"{numbering_argument}"
+                "--commit"
+            )
+
+            result = {
+                "status": final_status,
+                "run_id": run_id,

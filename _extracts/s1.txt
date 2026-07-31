@@ -1,0 +1,36 @@
+        default="safe",
+        help="Download pacing and retry profile",
+    )
+
+    # UNLIMITED_SAVED_RETRIEVAL_V61
+    parser.add_argument(
+        "--search-mode",
+        choices=("recent", "smart", "full"),
+        default="recent",
+        help=(
+            "Saved discovery strategy. Full mode ignores --limit "
+            "and continues gallery-dl cursor pagination to the end."
+        ),
+    )
+
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help=(
+            "Number of recent saved posts to inspect. "
+            "Ignored when --search-mode=full."
+        ),
+    )
+
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=5,
+        help=(
+            "Maximum number of new posts processed "
+            "in one committed batch"
+        ),
+    )
+
+    numbering_group = parser.add_mutually_exclusive_group()
