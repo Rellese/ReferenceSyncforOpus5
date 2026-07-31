@@ -1,0 +1,91 @@
+            str(output),
+        ]
+
+        self.reset_container_tree()
+        self.container_preview_output = output
+        self.active_operation_source = "containers"
+        self.process_output = ""
+        self._process_line_buffer = ""
+        self.log.clear()
+        self.process_started_at = datetime.now().timestamp()
+
+        self.table.setVisible(False)
+        self.operation_progress.setVisible(True)
+        self.operation_progress.setRange(0, 0)
+        self.operation_progress.setFormat(
+            "Получаем список папок…"
+        )
+        self.search_button.setEnabled(False)
+        self.status.setText(
+            "Получаем доступные папки источника…"
+        )
+        self.summary.setText("Папки: —")
+
+        self.process = QProcess(self)
+        self.process.setWorkingDirectory(str(PROJECT))
+        self.process.setProgram(str(PYTHON))
+        self.process.setArguments(arguments)
+        self.process.setProcessChannelMode(
+            QProcess.ProcessChannelMode.MergedChannels
+        )
+        self.process.readyReadStandardOutput.connect(
+            self.read_process_output
+        )
+        self.process.finished.connect(
+            self.preview_finished
+        )
+        self.process.start()
+
+    def finish_container_preview(
+        self,
+        exit_code: int,
+    ) -> None:
+        output = self.container_preview_output
+        self.active_operation_source = None
+        self.container_preview_output = None
+        self.operation_progress.setVisible(False)
+
+        if (
+            exit_code != 0
+            or output is None
+            or not output.is_file()
+        ):
+            self.table.setVisible(True)
+            self.status.setText(
+                "Не удалось получить список папок"
+            )
+            self.log.setVisible(True)
+            self.log_button.setChecked(True)
+            return
+
+        try:
+            payload = json.loads(
+                output.read_text(encoding="utf-8")
+            )
+        except Exception as error:
+            self.table.setVisible(True)
+            self.status.setText(
+                "Не удалось прочитать дерево папок"
+            )
+            self.log.append(str(error))
+            self.log.setVisible(True)
+            self.log_button.setChecked(True)
+            return
+        finally:
+            output.unlink(missing_ok=True)
+
+        if payload.get("status") != "SUCCESS":
+            self.table.setVisible(True)
+            self.status.setText(
+                str(
+                    payload.get("error")
+                    or "Получение папок завершилось с ошибкой"
+                )
+            )
+            return
+
+        self.container_payload = payload
+        self.populate_container_tree(
+            payload.get("root") or {}
+        )
+

@@ -1,0 +1,90 @@
+    def populate_container_tree(
+        self,
+        root: dict,
+    ) -> None:
+        self._updating_container_tree = True
+        self.container_tree.clear()
+
+        try:
+            if not isinstance(root, dict) or not root:
+                raise ValueError(
+                    "Источник не вернул корневой контейнер"
+                )
+
+            def add_node(
+                parent,
+                record: dict,
+            ) -> QTreeWidgetItem:
+                name = str(
+                    record.get("name") or "Без названия"
+                )
+                container_type = str(
+                    record.get("type") or "container"
+                )
+                metadata = record.get("metadata") or {}
+                count = (
+                    metadata.get("media_count")
+                    if container_type == "collection"
+                    else metadata.get("pin_count")
+                )
+
+                item = QTreeWidgetItem([
+                    name,
+                    container_type,
+                    "" if count is None else str(count),
+                ])
+                item.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    record,
+                )
+
+                if bool(record.get("selectable", True)):
+                    item.setFlags(
+                        item.flags()
+                        | Qt.ItemFlag.ItemIsUserCheckable
+                    )
+                    item.setCheckState(
+                        0,
+                        Qt.CheckState.Unchecked,
+                    )
+
+                if parent is None:
+                    self.container_tree.addTopLevelItem(
+                        item
+                    )
+                else:
+                    parent.addChild(item)
+
+                for child in record.get("children") or []:
+                    if isinstance(child, dict):
+                        add_node(item, child)
+
+                return item
+
+            top = add_node(None, root)
+            top.setExpanded(True)
+
+            for index in range(top.childCount()):
+                top.child(index).setExpanded(True)
+
+        finally:
+            self._updating_container_tree = False
+
+        self._folder_search_ready = True
+        self.table.setVisible(False)
+        self.container_tree.setVisible(True)
+        self.continue_folders_button.setVisible(True)
+        self.continue_folders_button.setEnabled(False)
+
+        total = int(
+            self.container_payload.get(
+                "container_count",
+                0,
+            )
+        )
+        self.summary.setText(f"Папки: {total}")
+        self.status.setText(
+            "Отметьте нужные папки и нажмите «Продолжить»"
+        )
+

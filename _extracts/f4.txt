@@ -1,0 +1,43 @@
+    def continue_with_selected_folders(self) -> None:
+        if not self._folder_search_ready:
+            return
+
+        self.refresh_container_selection()
+
+        if not self.selected_container_records:
+            QMessageBox.warning(
+                self,
+                "Папки не выбраны",
+                "Отметьте хотя бы одну папку.",
+            )
+            return
+
+        selected_names = [
+            str(item.get("name") or item.get("id"))
+            for item in self.selected_container_records
+        ]
+
+        self.status.setText(
+            "Папки выбраны — подготовка поиска публикаций"
+        )
+        self.summary.setText(
+            f"Выбрано папок: {len(selected_names)}"
+        )
+        self.log.setPlainText(
+            "Выбранные папки:\n"
+            + "\n".join(
+                f"• {name}"
+                for name in selected_names
+            )
+            + "\n\n"
+            + "Поиск публикаций не запущен: "
+            + "ожидается подключение folder-aware backend."
+        )
+
+        QMessageBox.information(
+            self,
+            "Папки выбраны",
+            "Выбор сохранён. На этом безопасном этапе "
+            "публикации ещё не загружаются.",
+        )
+
