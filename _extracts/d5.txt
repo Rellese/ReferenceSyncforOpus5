@@ -1,0 +1,110 @@
+        len(posts),
+    )
+
+    status_counts = Counter(
+        post["discovery_status"]
+        for post in posts
+    )
+
+    component_count = sum(
+        post["component_count_returned"]
+        for post in posts
+    )
+
+    summary = {
+        "status": status_info["status"],
+        "retryable": status_info["retryable"],
+        "recommendation": status_info["recommendation"],
+        "instagram_username": username,
+        "saved_url": saved_url,
+        "browser": browser,
+        "browser_details": browser_details,
+        "search_mode": args.search_mode,
+        "discovery_speed_profile": args.scan_speed,
+        "discovery_request_interval_seconds": (
+            [6.0, 12.0]
+            if args.scan_speed == "safe"
+            else [3.0, 6.0]
+        ),
+        "saved_page_size_requested": 50,
+        "requested_post_limit": (
+            args.limit
+            if args.search_mode == "recent"
+            else None
+        ),
+        "post_range_applied": (
+            args.search_mode == "recent"
+        ),
+        "smart_stop_filter_applied": (
+            smart_filter_applied
+        ),
+        "smart_stop_strategy": (
+            "FIRST_FULLY_KNOWN_POST"
+            if smart_filter_applied
+            else None
+        ),
+        "gallery_dl_returncode": process.returncode,
+        "logical_posts_returned": len(posts),
+        "media_components_returned": component_count,
+        "known_baseline_posts": status_counts.get(
+            "KNOWN_BASELINE_POST",
+            0,
+        ),
+        "new_post_candidates": (
+            status_counts.get(
+                "NEW_POST_CANDIDATE",
+                0,
+            )
+            + status_counts.get(
+                "RESTORE_DELETED_POST",
+                0,
+            )
+        ),
+        "restore_deleted_posts": status_counts.get(
+            "RESTORE_DELETED_POST",
+            0,
+        ),
+        "database": database_info,
+        "duration_seconds": round(
+            (finished_at - started_at).total_seconds(),
+            2,
+        ),
+        "files_downloaded": 0,
+    }
+
+    safety = {
+        "simulation_only": True,
+        "media_downloaded": 0,
+        "source_modified": False,
+        "eagle_library_modified": False,
+        "database_modified": False,
+        "eagle_api_requests": 0,
+        "eagle_items_created": 0,
+        "cookies_exported": False,
+        "cookie_values_written_to_report": False,
+    }
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    report_path = (
+        REPORTS_PATH
+        / f"instagram_discovery_{timestamp}.json"
+    )
+
+    posts_path = (
+        REPORTS_PATH
+        / f"instagram_discovery_posts_{timestamp}.json"
+    )
+
+    log_path = (
+        REPORTS_PATH
+        / f"instagram_discovery_log_{timestamp}.txt"
+    )
+
+    report = {
+        "generated_at": datetime.now().isoformat(),
+        "summary": summary,
+        "posts": posts,
+        "safety": safety,
+    }
+

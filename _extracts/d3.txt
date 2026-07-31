@@ -1,0 +1,111 @@
+    if args.search_mode == "recent":
+        command.extend([
+            "--post-range",
+            f"1-{args.limit}",
+        ])
+
+    command.extend([
+        "--retries",
+        "2",
+        "--http-timeout",
+        "30",
+        saved_url,
+    ])
+
+    (
+        known_post_ids,
+        database_info,
+        registry_state,
+    ) = load_known_post_ids(
+        DATABASE_PATH
+    )
+
+    (
+        alias_post_ids,
+        known_shortcodes,
+        known_urls,
+    ) = load_known_aliases(
+        DATABASE_PATH
+    )
+
+    known_post_ids.update(alias_post_ids)
+
+    # V6.4.6: SQLite stores history; Eagle determines live presence.
+    from app.instagram_eagle_reconcile import (
+        reconcile_instagram_registry,
+    )
+
+    live_registry = reconcile_instagram_registry(
+        DATABASE_PATH
+    )
+
+    inactive_post_ids = set(
+        live_registry.get("inactive_post_ids", set())
+    )
+    inactive_shortcodes = set(
+        live_registry.get("inactive_shortcodes", set())
+    )
+    inactive_urls = set(
+        live_registry.get("inactive_urls", set())
+    )
+
+    known_post_ids.difference_update(
+        inactive_post_ids
+    )
+    known_shortcodes.difference_update(
+        inactive_shortcodes
+    )
+    known_urls.difference_update(
+        inactive_urls
+    )
+
+    # Replace stale SQLite partial state with live Eagle state.
+    registry_state = dict(
+        live_registry.get("registry_state", {})
+    )
+
+    database_info["live_eagle_reconciliation"] = {
+        key: value
+        for key, value in live_registry.items()
+        if key not in {
+            "registry_state",
+            "inactive_post_ids",
+            "inactive_shortcodes",
+            "inactive_urls",
+        }
+    }
+
+    partial_urls = set()
+
+    if DATABASE_PATH.is_file():
+        try:
+            with sqlite3.connect(DATABASE_PATH) as connection:
+                tables = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master "
+                        "WHERE type = 'table'"
+                    )
+                }
+
+                if "instagram_sync_posts" in tables:
+                    rows = connection.execute(
+                        """
+                        SELECT canonical_url
+                        FROM instagram_sync_posts
+                        WHERE import_status = 'PARTIALLY_IMPORTED'
+                        """
+                    ).fetchall()
+
+                    partial_urls = {
+                        normalized
+                        for row in rows
+                        if (
+                            normalized
+                            := canonical_instagram_url(row[0])
+                        )
+                    }
+        except Exception:
+            partial_urls = set()
+
+    # Exclude both live partial and fully deleted publications

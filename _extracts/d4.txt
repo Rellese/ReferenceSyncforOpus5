@@ -1,0 +1,110 @@
+    # from Eagle alias re-addition and smart-stop identities.
+    partial_urls.update(
+        normalized_url
+        for state_post_id, state in registry_state.items()
+        if state.get("live_mode") in {
+            "RESUME_PARTIAL",
+            "REIMPORT_DELETED_AS_NEW",
+        }
+        for normalized_url in [
+            next(
+                (
+                    url
+                    for url in inactive_urls
+                    if state_post_id in inactive_post_ids
+                ),
+                None,
+            )
+        ]
+        if normalized_url
+    )
+    partial_urls.update(inactive_urls)
+
+    (
+        eagle_shortcodes,
+        eagle_urls,
+        eagle_identity_info,
+    ) = load_eagle_known_aliases(
+        partial_urls
+    )
+
+    known_shortcodes.update(eagle_shortcodes)
+    known_urls.update(eagle_urls)
+
+    database_info["known_identity_post_ids"] = len(
+        known_post_ids
+    )
+    database_info["known_identity_shortcodes"] = len(
+        known_shortcodes
+    )
+    database_info["known_identity_urls"] = len(
+        known_urls
+    )
+    database_info["eagle_identity_scan"] = (
+        eagle_identity_info
+    )
+
+    smart_filter_applied = False
+
+    if args.search_mode == "smart":
+        smart_filter = build_smart_stop_filter(
+            known_post_ids,
+            known_shortcodes,
+        )
+
+        if smart_filter:
+            command.extend([
+                "--filter",
+                smart_filter,
+            ])
+            smart_filter_applied = True
+
+    started_at = datetime.now()
+
+    process = run_gallery_dl(
+        command,
+        mode=args.search_mode,
+        scan_speed=args.scan_speed,
+        timeout_seconds=(
+            2 * 60 * 60
+            if args.search_mode in {"full", "smart"}
+            else 15 * 60
+        ),
+    )
+
+    finished_at = datetime.now()
+
+    sanitized_stderr = redact(process.stderr)
+    sanitized_stdout = redact(process.stdout)
+
+    parsed_values = parse_json_stream(process.stdout)
+
+    metadata_records: list[dict[str, Any]] = []
+    for value in parsed_values:
+        collect_metadata(value, metadata_records)
+
+    # Deduplicate repeated dictionary representations.
+    unique_metadata: dict[tuple[str, str, str], dict] = {}
+
+    for metadata in metadata_records:
+        key = (
+            str(metadata.get("post_id") or ""),
+            str(metadata.get("media_id") or ""),
+            str(metadata.get("num") or ""),
+        )
+        unique_metadata[key] = metadata
+
+    metadata_records = list(unique_metadata.values())
+
+    posts = build_post_records(
+        metadata_records,
+        known_post_ids,
+        known_shortcodes,
+        known_urls,
+        registry_state,
+    )
+
+    status_info = classify_failure(
+        process.returncode,
+        sanitized_stdout,
+        sanitized_stderr,
