@@ -1854,6 +1854,14 @@ def main() -> None:
                     ]
 
                 numbering_preview.append({
+                                        "containers": (
+                        candidate.get("containers")
+                        if isinstance(
+                            candidate.get("containers"),
+                            list,
+                        )
+                        else []
+                    ),
                     "position_in_batch": offset + 1,
                     "post_id": candidate.get(
                         "post_id"
